@@ -39,6 +39,8 @@ NVD_API_KEY=
 * CISA Known Exploited Vulnerabilities (CVE lookup)
 * URLhaus (URL lookup)
 * MalwareBazaar (SHA256 lookup)
+* ThreatFox (IP/domain lookup, optional API key)
+* AbuseIPDB (IP lookup, optional API key)
 
 ## Exit codes
 

@@ -5,9 +5,11 @@ use std::time::Duration;
 
 use ioccheck::cli::{Cli, Command, FailThreshold};
 use ioccheck::indicator::{Indicator, IndicatorType};
-use ioccheck::output::{AnalysisResult, BatchReport, BatchSummary, OutputFormatter, Severity};
+use ioccheck::output::{
+    AnalysisResult, BatchReport, BatchSummary, OutputFormatter, Severity, SourceFinding,
+};
 use ioccheck::scoring::{score_findings, severity_from_score};
-use ioccheck::sources::{cisa_kev, malwarebazaar, urlhaus};
+use ioccheck::sources::{abuseipdb, cisa_kev, malwarebazaar, threatfox, urlhaus};
 
 #[tokio::main]
 async fn main() {
@@ -37,7 +39,7 @@ async fn run(cli: Cli, client: Client) -> Result<i32, i32> {
     match cli.command {
         Command::Ip { value } => {
             let indicator = Indicator::parse_ip(&value).map_err(|_| 2)?;
-            let findings = vec![];
+            let findings = lookup_indicator(&client, &indicator).await.map_err(|_| 3)?;
             let score = score_findings(&findings);
             let risk = severity_from_score(score);
             let analysis = AnalysisResult::new(&indicator, risk.clone(), score, findings);
@@ -50,7 +52,7 @@ async fn run(cli: Cli, client: Client) -> Result<i32, i32> {
         }
         Command::Domain { value } => {
             let indicator = Indicator::parse_domain(&value).map_err(|_| 2)?;
-            let findings = vec![];
+            let findings = lookup_indicator(&client, &indicator).await.map_err(|_| 3)?;
             let score = score_findings(&findings);
             let risk = severity_from_score(score);
             let analysis = AnalysisResult::new(&indicator, risk.clone(), score, findings);
@@ -63,7 +65,7 @@ async fn run(cli: Cli, client: Client) -> Result<i32, i32> {
         }
         Command::Url { value } => {
             let indicator = Indicator::parse_url(&value).map_err(|_| 2)?;
-            let findings = urlhaus::lookup(&client, &indicator).await.map_err(|_| 3)?;
+            let findings = lookup_indicator(&client, &indicator).await.map_err(|_| 3)?;
             let score = score_findings(&findings);
             let risk = severity_from_score(score);
             let analysis = AnalysisResult::new(&indicator, risk.clone(), score, findings);
@@ -76,9 +78,7 @@ async fn run(cli: Cli, client: Client) -> Result<i32, i32> {
         }
         Command::Hash { value } => {
             let indicator = Indicator::parse_sha256(&value).map_err(|_| 2)?;
-            let findings = malwarebazaar::lookup(&client, &indicator)
-                .await
-                .map_err(|_| 3)?;
+            let findings = lookup_indicator(&client, &indicator).await.map_err(|_| 3)?;
             let score = score_findings(&findings);
             let risk = severity_from_score(score);
             let analysis = AnalysisResult::new(&indicator, risk.clone(), score, findings);
@@ -91,7 +91,7 @@ async fn run(cli: Cli, client: Client) -> Result<i32, i32> {
         }
         Command::Cve { value } => {
             let indicator = Indicator::parse_cve(&value).map_err(|_| 2)?;
-            let findings = cisa_kev::lookup(&client, &indicator).await.map_err(|_| 3)?;
+            let findings = lookup_indicator(&client, &indicator).await.map_err(|_| 3)?;
             let score = score_findings(&findings);
             let risk = severity_from_score(score);
             let analysis = AnalysisResult::new(&indicator, risk.clone(), score, findings);
@@ -115,18 +115,8 @@ async fn run(cli: Cli, client: Client) -> Result<i32, i32> {
 
                 match Indicator::from_guess(line) {
                     Ok(indicator) => {
-                        let findings = match indicator.kind {
-                            IndicatorType::Url => {
-                                urlhaus::lookup(&client, &indicator).await.map_err(|_| 3)?
-                            }
-                            IndicatorType::Sha256 => malwarebazaar::lookup(&client, &indicator)
-                                .await
-                                .map_err(|_| 3)?,
-                            IndicatorType::Cve => {
-                                cisa_kev::lookup(&client, &indicator).await.map_err(|_| 3)?
-                            }
-                            _ => Vec::new(),
-                        };
+                        let findings =
+                            lookup_indicator(&client, &indicator).await.map_err(|_| 3)?;
                         let score = score_findings(&findings);
                         let risk = severity_from_score(score);
                         results.push(AnalysisResult::new(&indicator, risk, score, findings));
@@ -165,6 +155,25 @@ async fn run(cli: Cli, client: Client) -> Result<i32, i32> {
             };
             Ok(exit_code)
         }
+    }
+}
+
+async fn lookup_indicator(
+    client: &Client,
+    indicator: &Indicator,
+) -> anyhow::Result<Vec<SourceFinding>> {
+    match indicator.kind {
+        IndicatorType::Ip => {
+            let mut findings = Vec::new();
+            findings.extend(threatfox::lookup(client, indicator).await?);
+            findings.extend(abuseipdb::lookup(client, indicator).await?);
+            Ok(findings)
+        }
+        IndicatorType::Domain => threatfox::lookup(client, indicator).await,
+        IndicatorType::Url => urlhaus::lookup(client, indicator).await,
+        IndicatorType::Sha256 => malwarebazaar::lookup(client, indicator).await,
+        IndicatorType::Cve => cisa_kev::lookup(client, indicator).await,
+        _ => Ok(Vec::new()),
     }
 }
 
