@@ -36,3 +36,14 @@ Flow per indicator (`src/main.rs::run`): parse/validate → `lookup_indicator` (
 - **JSON casing is uniformly lowercase:** `AnalysisResult.risk`, `SourceFinding.severity` (`Severity` derives `#[serde(rename_all = "lowercase")]`), and `indicator_type` (explicit lowercase match in `AnalysisResult::new`) all serialize lowercase (`"high"`, `"cve"`). Downstream automation depends on this — update `README.md` if you change any output shape.
 - Application errors use `anyhow` with `.context(...)`; custom errors use `thiserror`. Avoid `unwrap()`/`expect()` in request/parse paths.
 - `src/main.rs` repeats nearly identical per-command blocks; if you touch the single-lookup pipeline, change every command arm or refactor them together.
+
+## Roadmap (post-MVP)
+
+The MVP is complete. The prioritized backlog lives in `AGENTS.md` ("Post-MVP roadmap") — read it before starting new feature work. Highest-value next steps:
+
+- **Caching layer** — `--cache`/`--cache-ttl` are parsed but ignored; implement a `(source, indicator)` cache with TTL under `~/.cache/ioccheck/`, wrapping each source call (keep sources cache-unaware). Never cache API keys.
+- **Scoring-contract guard** — replace the literal source-name matches in `scoring.rs` with shared constants referenced by both source modules and scoring, plus a test that every known source string scores non-zero (see the contract risk noted above).
+- **Refactor the repeated `main.rs` command arms** into one shared `analyze_and_print` helper.
+- **Per-source error isolation + concurrency** — stop letting one source's `Err` drop its siblings (see the aggregate-failure convention above); run a type's sources concurrently.
+
+Each item is independently shippable; see `AGENTS.md` for the full tiered list (additional sources, indicator defang/normalization, output formats).
