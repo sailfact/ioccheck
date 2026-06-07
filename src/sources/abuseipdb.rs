@@ -14,10 +14,15 @@ struct AbuseIpDbResponse {
 
 #[derive(Deserialize)]
 struct AbuseIpDbData {
+    #[serde(rename = "ipAddress")]
     ip_address: String,
+    #[serde(rename = "abuseConfidenceScore")]
     abuse_confidence_score: u8,
+    #[serde(rename = "totalReports")]
     total_reports: Option<u32>,
+    #[serde(rename = "countryCode")]
     country_code: Option<String>,
+    #[serde(rename = "isPublic")]
     is_public: Option<bool>,
 }
 
@@ -52,6 +57,10 @@ pub async fn lookup(client: &Client, indicator: &Indicator) -> Result<Vec<Source
         .await
         .context("failed to parse AbuseIPDB response")?;
 
+    Ok(findings_from_response(result))
+}
+
+fn findings_from_response(result: AbuseIpDbResponse) -> Vec<SourceFinding> {
     let confidence = result.data.abuse_confidence_score;
     let severity = if confidence > 75 {
         Severity::High
@@ -75,10 +84,39 @@ pub async fn lookup(client: &Client, indicator: &Indicator) -> Result<Vec<Source
         "is_public": result.data.is_public,
     });
 
-    Ok(vec![SourceFinding {
+    vec![SourceFinding {
         source: "AbuseIPDB".to_string(),
         severity,
         summary,
         details: Some(details),
-    }])
+    }]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalizes_abuseipdb_high_confidence_from_fixture() {
+        let fixture = include_str!("../../tests/fixtures/sources/abuseipdb_high.json");
+        let response: AbuseIpDbResponse = serde_json::from_str(fixture).unwrap();
+
+        let findings = findings_from_response(response);
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].source, "AbuseIPDB");
+        assert_eq!(findings[0].severity, Severity::High);
+        assert!(findings[0].summary.contains("92%"));
+        assert_eq!(findings[0].details.as_ref().unwrap()["total_reports"], 83);
+    }
+
+    #[test]
+    fn normalizes_abuseipdb_medium_confidence_from_fixture() {
+        let fixture = include_str!("../../tests/fixtures/sources/abuseipdb_medium.json");
+        let response: AbuseIpDbResponse = serde_json::from_str(fixture).unwrap();
+
+        let findings = findings_from_response(response);
+
+        assert_eq!(findings[0].severity, Severity::Medium);
+    }
 }

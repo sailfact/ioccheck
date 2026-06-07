@@ -1,0 +1,19 @@
+{
+  "title": "CISA Known Exploited Vulnerabilities Catalog",
+  "catalogVersion": "2024.04.01",
+  "dateReleased": "2024-04-01T00:00:00Z",
+  "known_exploited_vulnerabilities": [
+    {
+      "cveID": "CVE-2024-3094",
+      "vendorProject": "XZ Utils",
+      "product": "XZ Utils",
+      "vulnerabilityName": "XZ Utils Embedded Malicious Code Vulnerability",
+      "dateAdded": "2024-04-01",
+      "shortDescription": "Malicious code was discovered in XZ Utils.",
+      "requiredAction": "Apply mitigations per vendor instructions.",
+      "dueDate": "2024-04-22",
+      "knownRansomwareCampaignUse": "Unknown",
+      "notes": "https://www.cisa.gov/news-events/alerts/2024/03/29/reported-supply-chain-compromise-affecting-xz-utils-data-compression-library-cve-2024-3094"
+    }
+  ]
+}

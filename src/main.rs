@@ -105,28 +105,35 @@ async fn run(cli: Cli, client: Client) -> Result<i32, i32> {
         Command::File { path } => {
             let text = std::fs::read_to_string(&path).map_err(|_| 2)?;
             let mut results = Vec::new();
-            let mut errors = 0;
+            let mut input_errors = 0;
+            let mut source_errors = 0;
 
-            for (_line_number, line) in text.lines().enumerate() {
+            for (line_number, line) in text.lines().enumerate() {
                 let line = line.trim();
                 if line.is_empty() || line.starts_with('#') {
                     continue;
                 }
 
                 match Indicator::from_guess(line) {
-                    Ok(indicator) => {
-                        let findings =
-                            lookup_indicator(&client, &indicator).await.map_err(|_| 3)?;
-                        let score = score_findings(&findings);
-                        let risk = severity_from_score(score);
-                        results.push(AnalysisResult::new(&indicator, risk, score, findings));
-                    }
+                    Ok(indicator) => match lookup_indicator(&client, &indicator).await {
+                        Ok(findings) => {
+                            let score = score_findings(&findings);
+                            let risk = severity_from_score(score);
+                            results.push(AnalysisResult::new(&indicator, risk, score, findings));
+                        }
+                        Err(error) => {
+                            source_errors += 1;
+                            eprintln!("failed to scan line {} ({line}): {error}", line_number + 1);
+                        }
+                    },
                     Err(_) => {
-                        errors += 1;
+                        input_errors += 1;
+                        eprintln!("invalid indicator on line {}: {line}", line_number + 1);
                     }
                 }
             }
 
+            let errors = input_errors + source_errors;
             output
                 .print_batch(&BatchReport {
                     results: results.clone(),
@@ -144,10 +151,16 @@ async fn run(cli: Cli, client: Client) -> Result<i32, i32> {
                 if threshold_reached(&risk, fail_threshold) {
                     1
                 } else {
-                    0
+                    if source_errors > 0 {
+                        3
+                    } else {
+                        0
+                    }
                 }
             } else {
-                if errors > 0 {
+                if source_errors > 0 {
+                    3
+                } else if input_errors > 0 {
                     2
                 } else {
                     0

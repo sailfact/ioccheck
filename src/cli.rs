@@ -16,10 +16,14 @@ pub struct Cli {
     #[arg(long, default_value_t = 15)]
     pub timeout: u64,
 
-    #[arg(long)]
+    #[arg(long, help = "Reserved for v2; currently ignored")]
     pub cache: bool,
 
-    #[arg(long, default_value_t = 3600)]
+    #[arg(
+        long,
+        default_value_t = 3600,
+        help = "Reserved for v2; currently ignored"
+    )]
     pub cache_ttl: u64,
 
     #[arg(long, value_enum)]

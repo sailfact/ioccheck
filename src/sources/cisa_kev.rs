@@ -16,8 +16,10 @@ struct CisaFeed {
 struct CisaEntry {
     #[serde(rename = "cveID")]
     cve_id: String,
+    #[serde(rename = "vendorProject")]
     vendor_project: Option<String>,
     product: Option<String>,
+    #[serde(rename = "dateAdded")]
     date_added: Option<String>,
 }
 
@@ -37,6 +39,10 @@ pub async fn lookup(client: &Client, indicator: &Indicator) -> Result<Vec<Source
         .await
         .context("failed to parse CISA KEV feed")?;
 
+    Ok(findings_from_feed(indicator, feed))
+}
+
+fn findings_from_feed(indicator: &Indicator, feed: CisaFeed) -> Vec<SourceFinding> {
     let found = feed
         .known_exploited_vulnerabilities
         .into_iter()
@@ -47,7 +53,7 @@ pub async fn lookup(client: &Client, indicator: &Indicator) -> Result<Vec<Source
         let product = entry.product.clone().unwrap_or_default();
         let summary = format!("Listed in CISA KEV feed: {} {}", vendor_project, product);
 
-        Ok(vec![SourceFinding {
+        vec![SourceFinding {
             source: "CISA KEV".to_string(),
             severity: Severity::High,
             summary,
@@ -57,8 +63,43 @@ pub async fn lookup(client: &Client, indicator: &Indicator) -> Result<Vec<Source
                 "vendor_project": entry.vendor_project,
                 "product": entry.product,
             })),
-        }])
+        }]
     } else {
-        Ok(Vec::new())
+        Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::indicator::IndicatorType;
+
+    #[test]
+    fn normalizes_cisa_kev_hit_from_fixture() {
+        let fixture = include_str!("../../tests/fixtures/sources/cisa_kev_hit.json");
+        let feed: CisaFeed = serde_json::from_str(fixture).unwrap();
+        let indicator = Indicator::new("CVE-2024-3094", IndicatorType::Cve);
+
+        let findings = findings_from_feed(&indicator, feed);
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].source, "CISA KEV");
+        assert_eq!(findings[0].severity, Severity::High);
+        assert!(findings[0].summary.contains("XZ Utils"));
+        assert_eq!(
+            findings[0].details.as_ref().unwrap()["date_added"],
+            "2024-04-01"
+        );
+    }
+
+    #[test]
+    fn normalizes_cisa_kev_miss_from_fixture() {
+        let fixture = include_str!("../../tests/fixtures/sources/cisa_kev_hit.json");
+        let feed: CisaFeed = serde_json::from_str(fixture).unwrap();
+        let indicator = Indicator::new("CVE-2099-0001", IndicatorType::Cve);
+
+        let findings = findings_from_feed(&indicator, feed);
+
+        assert!(findings.is_empty());
     }
 }

@@ -1,8 +1,10 @@
 use colored::Colorize;
 use serde::Serialize;
 use serde_json::Value;
+use std::io::Error;
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
 pub enum Severity {
     Info,
     Low,
@@ -66,7 +68,15 @@ impl AnalysisResult {
 
         Self {
             indicator: indicator.value.clone(),
-            indicator_type: format!("{:?}", indicator.kind),
+            indicator_type: match indicator.kind {
+                crate::indicator::IndicatorType::Ip => "ip",
+                crate::indicator::IndicatorType::Domain => "domain",
+                crate::indicator::IndicatorType::Url => "url",
+                crate::indicator::IndicatorType::Sha256 => "sha256",
+                crate::indicator::IndicatorType::Cve => "cve",
+                crate::indicator::IndicatorType::Unknown => "unknown",
+            }
+            .to_string(),
             risk: risk.as_str().to_string(),
             score,
             findings,
@@ -135,15 +145,18 @@ impl OutputFormatter {
 
     pub fn print_single(&self, analysis: &AnalysisResult) -> Result<(), std::io::Error> {
         if self.json {
-            let output = serde_json::to_string_pretty(&analysis).unwrap();
+            let output = serde_json::to_string_pretty(&analysis).map_err(Error::other)?;
             println!("{}", output);
             return Ok(());
         }
 
         println!("Indicator: {}", analysis.indicator);
-        println!("Type:      {}", analysis.indicator_type);
+        println!(
+            "Type:      {}",
+            self.human_indicator_type(&analysis.indicator_type)
+        );
         println!("Risk:      {}", self.color_risk(&analysis.risk));
-        println!("");
+        println!();
         println!("Findings:");
 
         if analysis.findings.is_empty() {
@@ -160,7 +173,7 @@ impl OutputFormatter {
         }
 
         if let Some(summary) = &analysis.summary {
-            println!("");
+            println!();
             println!("Recommendation:");
             println!("  {}", summary);
         }
@@ -170,7 +183,7 @@ impl OutputFormatter {
 
     pub fn print_batch(&self, report: &BatchReport) -> Result<(), std::io::Error> {
         if self.json {
-            let output = serde_json::to_string_pretty(&report).unwrap();
+            let output = serde_json::to_string_pretty(&report).map_err(Error::other)?;
             println!("{}", output);
             return Ok(());
         }
@@ -202,6 +215,17 @@ impl OutputFormatter {
             "medium" => value.cyan().to_string(),
             "low" => value.green().to_string(),
             _ => value.normal().to_string(),
+        }
+    }
+
+    fn human_indicator_type(&self, value: &str) -> String {
+        match value {
+            "ip" => "IP".to_string(),
+            "url" => "URL".to_string(),
+            "sha256" => "SHA256".to_string(),
+            "cve" => "CVE".to_string(),
+            "domain" => "Domain".to_string(),
+            _ => value.to_string(),
         }
     }
 }

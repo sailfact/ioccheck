@@ -1,0 +1,12 @@
+{
+  "query_status": "ok",
+  "id": "1234567",
+  "urlhaus_reference": "https://urlhaus.abuse.ch/url/1234567/",
+  "url": "http://example.com/dropper.exe",
+  "url_status": "online",
+  "host": "example.com",
+  "date_added": "2024-03-29 10:00:00 UTC",
+  "threat": "malware_download",
+  "reporter": "abuse_ch",
+  "tags": ["elf", "loader"]
+}

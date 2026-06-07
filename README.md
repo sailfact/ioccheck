@@ -20,8 +20,8 @@ cargo run -- file indicators.txt --fail-on high
 * `--json` - output machine-readable JSON
 * `--no-color` - disable colored output
 * `--timeout <seconds>` - request timeout for API lookups
-* `--cache` - placeholder cache flag
-* `--cache-ttl <seconds>` - placeholder cache TTL flag
+* `--cache` - reserved for v2; currently ignored
+* `--cache-ttl <seconds>` - reserved for v2; currently ignored
 * `--fail-on <low|medium|high|critical>` - return exit code `1` when the highest finding meets or exceeds this threshold
 
 ## Environment
