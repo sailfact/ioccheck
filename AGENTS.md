@@ -555,6 +555,67 @@ Avoid these until the core CLI works:
 
 ---
 
+## Post-MVP roadmap
+
+The MVP is complete: all five indicator types parse and validate, seven sources
+are wired in (CISA KEV, NVD, URLhaus, MalwareBazaar, ThreatFox, AbuseIPDB, OTX),
+scoring → severity → output (human + JSON) works, bulk file mode exists, and the
+test suite covers parsing, scoring, output shape, and per-source normalization.
+
+The following backlog is ordered by value/effort. Each item is independently
+shippable — pick items rather than treating this as one large change.
+
+### Tier 1 — highest value, already-promised or low-risk
+
+1. **Caching layer (the one explicit v2 feature).** The `--cache` /
+   `--cache-ttl` flags already exist but are ignored. Implement a cache keyed by
+   `(source, indicator)` storing normalized `Vec<SourceFinding>` with a
+   timestamp, honoring the configured TTL. Use a simple local JSON cache under
+   `~/.cache/ioccheck/`. Wrap each source call (do not make source modules
+   cache-aware). Never cache API keys. Add unit tests against a temp dir; no
+   network. Update `README.md` and `CLAUDE.md` (drop "currently ignored").
+2. **Scoring-contract guard.** `scoring.rs` matches source names as string
+   literals, so a rename silently drops a source's score. Introduce shared
+   source-name constants referenced by both source modules and `scoring.rs`
+   (rename becomes a compile error) and add a test asserting each known source
+   string yields a non-zero score.
+3. **De-duplicate the single-lookup command arms.** `main.rs` repeats five
+   near-identical blocks. Map each `Command` variant to its parsed `Indicator`,
+   then run one shared `analyze_and_print` helper for the common
+   lookup → score → severity → print → threshold pipeline.
+
+### Tier 2 — robustness & correctness
+
+4. **Concurrent source queries.** Sources run sequentially today; fire a type's
+   sources concurrently with `tokio::join!` / `join_all` and flatten.
+5. **Per-source error isolation.** `lookup_indicator` joins sources behind a
+   single `?`, so one source's `Err` discards every sibling's findings and trips
+   exit 3. Collect per-source results, keep the `Ok` findings, warn on the
+   `Err`s, and only return exit 3 if every source failed (or behind `--strict`).
+6. **Retry / backoff on transient errors.** Bounded retry (e.g. 2 attempts) for
+   transient HTTP errors, ideally centralized in the cache/query wrapper.
+7. **API-key visibility.** Optionally (e.g. `--verbose` / stderr) note which
+   key-gated sources were skipped for a missing key, keeping default output
+   clean and machine-readable.
+
+### Tier 3 — new capabilities / coverage
+
+8. **Additional sources** following the existing two-function split + fixture
+   test pattern: GreyNoise (IP), Shodan (IP/domain), VirusTotal (all types),
+   Spamhaus/DNSBL (IP). Each needs a dispatch entry, a scoring arm (via the
+   Tier 1 constants), and fixtures.
+9. **Indicator normalization:** URL canonicalization, hostname extraction from
+   URLs, and defang/refang support (`hxxp://`, `1.1.1.1[.]evil`) on input.
+10. **Output enhancements:** `--output <file>`, CSV output for bulk mode, and
+    populating the currently-null `AnalysisResult.summary` recommendation.
+
+### Tier 4 — larger / later
+
+These remain out of scope unless explicitly requested: TUI interface,
+daemon/watch mode, MISP/OpenCTI integration, STIX/TAXII export.
+
+---
+
 ## Coding style
 
 Prefer explicit, readable code.
