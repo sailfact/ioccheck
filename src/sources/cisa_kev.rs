@@ -9,7 +9,8 @@ static CISA_KEV_FEED: &str =
 
 #[derive(Deserialize)]
 struct CisaFeed {
-    known_exploited_vulnerabilities: Vec<CisaEntry>,
+    // The live feed names this array `vulnerabilities`.
+    vulnerabilities: Vec<CisaEntry>,
 }
 
 #[derive(Deserialize)]
@@ -44,7 +45,7 @@ pub async fn lookup(client: &Client, indicator: &Indicator) -> Result<Vec<Source
 
 fn findings_from_feed(indicator: &Indicator, feed: CisaFeed) -> Vec<SourceFinding> {
     let found = feed
-        .known_exploited_vulnerabilities
+        .vulnerabilities
         .into_iter()
         .find(|entry| entry.cve_id.eq_ignore_ascii_case(&indicator.value));
 

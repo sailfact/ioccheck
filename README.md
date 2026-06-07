@@ -30,6 +30,7 @@ Optional API keys may be provided in a `.env` file or environment variables:
 
 ```bash
 ABUSEIPDB_API_KEY=
+THREATFOX_API_KEY=
 OTX_API_KEY=
 NVD_API_KEY=
 ```
@@ -37,10 +38,12 @@ NVD_API_KEY=
 ## Implemented sources
 
 * CISA Known Exploited Vulnerabilities (CVE lookup)
+* NVD API (CVE lookup; works without a key, `NVD_API_KEY` only raises the rate limit)
 * URLhaus (URL lookup)
 * MalwareBazaar (SHA256 lookup)
-* ThreatFox (IP/domain lookup, optional API key)
-* AbuseIPDB (IP lookup, optional API key)
+* ThreatFox (IP/domain lookup, requires `THREATFOX_API_KEY`)
+* AbuseIPDB (IP lookup, requires `ABUSEIPDB_API_KEY`)
+* AlienVault OTX (all indicator types, requires `OTX_API_KEY`)
 
 ## Exit codes
 

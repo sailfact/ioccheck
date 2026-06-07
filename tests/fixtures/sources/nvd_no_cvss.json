@@ -1,0 +1,13 @@
+{
+  "vulnerabilities": [
+    {
+      "cve": {
+        "id": "CVE-2099-0001",
+        "descriptions": [
+          { "lang": "en", "value": "A newly reserved CVE awaiting analysis." }
+        ],
+        "metrics": {}
+      }
+    }
+  ]
+}

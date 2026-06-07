@@ -20,6 +20,30 @@ fn score_cisa_kev_is_high() {
 }
 
 #[test]
+fn score_otx_medium_is_fifteen() {
+    let findings = vec![SourceFinding {
+        source: "AlienVault OTX".to_string(),
+        severity: Severity::Medium,
+        summary: "AlienVault OTX: seen in 7 pulses".to_string(),
+        details: None,
+    }];
+
+    assert_eq!(score_findings(&findings), 15);
+}
+
+#[test]
+fn score_nvd_uses_severity_default() {
+    let findings = vec![SourceFinding {
+        source: "NVD".to_string(),
+        severity: Severity::Critical,
+        summary: "NVD: CVSS 10.0 (critical)".to_string(),
+        details: None,
+    }];
+
+    assert_eq!(score_findings(&findings), 30);
+}
+
+#[test]
 fn severity_from_score_map() {
     assert_eq!(severity_from_score(0), Severity::Low);
     assert_eq!(severity_from_score(25), Severity::Medium);

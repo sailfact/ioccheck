@@ -16,6 +16,12 @@ pub fn score_findings(findings: &[SourceFinding]) -> u8 {
                 Severity::Info => {}
                 Severity::Critical => score = score.saturating_add(30),
             },
+            "AlienVault OTX" => match finding.severity {
+                Severity::Medium => score = score.saturating_add(15),
+                Severity::Low => score = score.saturating_add(5),
+                _ => {}
+            },
+            // NVD (and any other source) scores by its normalized severity.
             _ => match finding.severity {
                 Severity::Critical => score = score.saturating_add(30),
                 Severity::High => score = score.saturating_add(20),

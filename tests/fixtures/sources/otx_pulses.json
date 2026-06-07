@@ -1,0 +1,9 @@
+{
+  "pulse_info": {
+    "count": 7,
+    "pulses": [
+      { "name": "Cobalt Strike C2 infrastructure", "tags": ["c2", "cobaltstrike"] },
+      { "name": "Known malware hosting", "tags": ["malware"] }
+    ]
+  }
+}

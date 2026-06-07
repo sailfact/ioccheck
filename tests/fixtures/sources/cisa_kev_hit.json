@@ -2,7 +2,7 @@
   "title": "CISA Known Exploited Vulnerabilities Catalog",
   "catalogVersion": "2024.04.01",
   "dateReleased": "2024-04-01T00:00:00Z",
-  "known_exploited_vulnerabilities": [
+  "vulnerabilities": [
     {
       "cveID": "CVE-2024-3094",
       "vendorProject": "XZ Utils",

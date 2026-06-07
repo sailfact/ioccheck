@@ -1,6 +1,8 @@
 pub mod abuseipdb;
 pub mod cisa_kev;
 pub mod malwarebazaar;
+pub mod nvd;
+pub mod otx;
 pub mod threatfox;
 pub mod urlhaus;
 

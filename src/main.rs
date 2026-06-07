@@ -9,7 +9,7 @@ use ioccheck::output::{
     AnalysisResult, BatchReport, BatchSummary, OutputFormatter, Severity, SourceFinding,
 };
 use ioccheck::scoring::{score_findings, severity_from_score};
-use ioccheck::sources::{abuseipdb, cisa_kev, malwarebazaar, threatfox, urlhaus};
+use ioccheck::sources::{abuseipdb, cisa_kev, malwarebazaar, nvd, otx, threatfox, urlhaus};
 
 #[tokio::main]
 async fn main() {
@@ -180,12 +180,34 @@ async fn lookup_indicator(
             let mut findings = Vec::new();
             findings.extend(threatfox::lookup(client, indicator).await?);
             findings.extend(abuseipdb::lookup(client, indicator).await?);
+            findings.extend(otx::lookup(client, indicator).await?);
             Ok(findings)
         }
-        IndicatorType::Domain => threatfox::lookup(client, indicator).await,
-        IndicatorType::Url => urlhaus::lookup(client, indicator).await,
-        IndicatorType::Sha256 => malwarebazaar::lookup(client, indicator).await,
-        IndicatorType::Cve => cisa_kev::lookup(client, indicator).await,
+        IndicatorType::Domain => {
+            let mut findings = Vec::new();
+            findings.extend(threatfox::lookup(client, indicator).await?);
+            findings.extend(otx::lookup(client, indicator).await?);
+            Ok(findings)
+        }
+        IndicatorType::Url => {
+            let mut findings = Vec::new();
+            findings.extend(urlhaus::lookup(client, indicator).await?);
+            findings.extend(otx::lookup(client, indicator).await?);
+            Ok(findings)
+        }
+        IndicatorType::Sha256 => {
+            let mut findings = Vec::new();
+            findings.extend(malwarebazaar::lookup(client, indicator).await?);
+            findings.extend(otx::lookup(client, indicator).await?);
+            Ok(findings)
+        }
+        IndicatorType::Cve => {
+            let mut findings = Vec::new();
+            findings.extend(cisa_kev::lookup(client, indicator).await?);
+            findings.extend(nvd::lookup(client, indicator).await?);
+            findings.extend(otx::lookup(client, indicator).await?);
+            Ok(findings)
+        }
         _ => Ok(Vec::new()),
     }
 }
