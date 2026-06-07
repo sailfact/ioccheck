@@ -9,6 +9,34 @@ pub mod urlhaus;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
+/// Canonical `SourceFinding.source` strings.
+///
+/// These are the contract between a source module and `scoring.rs`: a source
+/// emits findings tagged with one of these names, and scoring matches on the
+/// same constant. Referencing the constant on both sides means a rename is a
+/// compile error rather than a silently dropped score.
+pub mod names {
+    pub const CISA_KEV: &str = "CISA KEV";
+    pub const NVD: &str = "NVD";
+    pub const URLHAUS: &str = "URLhaus";
+    pub const MALWAREBAZAAR: &str = "MalwareBazaar";
+    pub const THREATFOX: &str = "ThreatFox";
+    pub const ABUSEIPDB: &str = "AbuseIPDB";
+    pub const OTX: &str = "AlienVault OTX";
+
+    /// Every known source name. Kept in sync with the constants above and used
+    /// by the scoring-contract guard test.
+    pub const ALL: &[&str] = &[
+        CISA_KEV,
+        NVD,
+        URLHAUS,
+        MALWAREBAZAAR,
+        THREATFOX,
+        ABUSEIPDB,
+        OTX,
+    ];
+}
+
 pub(crate) fn deserialize_optional_string_list<'de, D>(
     deserializer: D,
 ) -> Result<Option<Vec<String>>, D::Error>

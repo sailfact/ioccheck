@@ -36,139 +36,109 @@ async fn run(cli: Cli, client: Client) -> Result<i32, i32> {
     let output = OutputFormatter::new(cli.no_color, cli.json);
     let fail_threshold = cli.fail_on.map(FailThreshold::into);
 
-    match cli.command {
-        Command::Ip { value } => {
-            let indicator = Indicator::parse_ip(&value).map_err(|_| 2)?;
-            let findings = lookup_indicator(&client, &indicator).await.map_err(|_| 3)?;
-            let score = score_findings(&findings);
-            let risk = severity_from_score(score);
-            let analysis = AnalysisResult::new(&indicator, risk.clone(), score, findings);
-            output.print_single(&analysis).map_err(|_| 3)?;
-            Ok(if threshold_reached(&risk, fail_threshold) {
-                1
-            } else {
-                0
-            })
-        }
-        Command::Domain { value } => {
-            let indicator = Indicator::parse_domain(&value).map_err(|_| 2)?;
-            let findings = lookup_indicator(&client, &indicator).await.map_err(|_| 3)?;
-            let score = score_findings(&findings);
-            let risk = severity_from_score(score);
-            let analysis = AnalysisResult::new(&indicator, risk.clone(), score, findings);
-            output.print_single(&analysis).map_err(|_| 3)?;
-            Ok(if threshold_reached(&risk, fail_threshold) {
-                1
-            } else {
-                0
-            })
-        }
-        Command::Url { value } => {
-            let indicator = Indicator::parse_url(&value).map_err(|_| 2)?;
-            let findings = lookup_indicator(&client, &indicator).await.map_err(|_| 3)?;
-            let score = score_findings(&findings);
-            let risk = severity_from_score(score);
-            let analysis = AnalysisResult::new(&indicator, risk.clone(), score, findings);
-            output.print_single(&analysis).map_err(|_| 3)?;
-            Ok(if threshold_reached(&risk, fail_threshold) {
-                1
-            } else {
-                0
-            })
-        }
-        Command::Hash { value } => {
-            let indicator = Indicator::parse_sha256(&value).map_err(|_| 2)?;
-            let findings = lookup_indicator(&client, &indicator).await.map_err(|_| 3)?;
-            let score = score_findings(&findings);
-            let risk = severity_from_score(score);
-            let analysis = AnalysisResult::new(&indicator, risk.clone(), score, findings);
-            output.print_single(&analysis).map_err(|_| 3)?;
-            Ok(if threshold_reached(&risk, fail_threshold) {
-                1
-            } else {
-                0
-            })
-        }
-        Command::Cve { value } => {
-            let indicator = Indicator::parse_cve(&value).map_err(|_| 2)?;
-            let findings = lookup_indicator(&client, &indicator).await.map_err(|_| 3)?;
-            let score = score_findings(&findings);
-            let risk = severity_from_score(score);
-            let analysis = AnalysisResult::new(&indicator, risk.clone(), score, findings);
-            output.print_single(&analysis).map_err(|_| 3)?;
-            Ok(if threshold_reached(&risk, fail_threshold) {
-                1
-            } else {
-                0
-            })
-        }
-        Command::File { path } => {
-            let text = std::fs::read_to_string(&path).map_err(|_| 2)?;
-            let mut results = Vec::new();
-            let mut input_errors = 0;
-            let mut source_errors = 0;
+    // Each single-indicator command differs only in how its argument is parsed;
+    // everything after parsing is the shared `analyze_and_print` pipeline. File
+    // mode has its own batch pipeline.
+    let indicator = match cli.command {
+        Command::Ip { value } => Indicator::parse_ip(&value).map_err(|_| 2)?,
+        Command::Domain { value } => Indicator::parse_domain(&value).map_err(|_| 2)?,
+        Command::Url { value } => Indicator::parse_url(&value).map_err(|_| 2)?,
+        Command::Hash { value } => Indicator::parse_sha256(&value).map_err(|_| 2)?,
+        Command::Cve { value } => Indicator::parse_cve(&value).map_err(|_| 2)?,
+        Command::File { path } => return run_file(&client, &output, fail_threshold, &path).await,
+    };
 
-            for (line_number, line) in text.lines().enumerate() {
-                let line = line.trim();
-                if line.is_empty() || line.starts_with('#') {
-                    continue;
-                }
+    analyze_and_print(&client, &output, fail_threshold, &indicator).await
+}
 
-                match Indicator::from_guess(line) {
-                    Ok(indicator) => match lookup_indicator(&client, &indicator).await {
-                        Ok(findings) => {
-                            let score = score_findings(&findings);
-                            let risk = severity_from_score(score);
-                            results.push(AnalysisResult::new(&indicator, risk, score, findings));
-                        }
-                        Err(error) => {
-                            source_errors += 1;
-                            eprintln!("failed to scan line {} ({line}): {error}", line_number + 1);
-                        }
-                    },
-                    Err(_) => {
-                        input_errors += 1;
-                        eprintln!("invalid indicator on line {}: {line}", line_number + 1);
-                    }
+/// Shared single-indicator pipeline: lookup → score → severity → print →
+/// threshold. Returns the process exit code.
+async fn analyze_and_print(
+    client: &Client,
+    output: &OutputFormatter,
+    fail_threshold: Option<Severity>,
+    indicator: &Indicator,
+) -> Result<i32, i32> {
+    let findings = lookup_indicator(client, indicator).await.map_err(|_| 3)?;
+    let score = score_findings(&findings);
+    let risk = severity_from_score(score);
+    let analysis = AnalysisResult::new(indicator, risk.clone(), score, findings);
+    output.print_single(&analysis).map_err(|_| 3)?;
+    Ok(if threshold_reached(&risk, fail_threshold) {
+        1
+    } else {
+        0
+    })
+}
+
+/// Bulk file pipeline: one indicator per line, skipping blanks and `#`
+/// comments, continuing past per-line failures and reporting a batch summary.
+async fn run_file(
+    client: &Client,
+    output: &OutputFormatter,
+    fail_threshold: Option<Severity>,
+    path: &std::path::Path,
+) -> Result<i32, i32> {
+    let text = std::fs::read_to_string(path).map_err(|_| 2)?;
+    let mut results = Vec::new();
+    let mut input_errors = 0;
+    let mut source_errors = 0;
+
+    for (line_number, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        match Indicator::from_guess(line) {
+            Ok(indicator) => match lookup_indicator(client, &indicator).await {
+                Ok(findings) => {
+                    let score = score_findings(&findings);
+                    let risk = severity_from_score(score);
+                    results.push(AnalysisResult::new(&indicator, risk, score, findings));
                 }
+                Err(error) => {
+                    source_errors += 1;
+                    eprintln!("failed to scan line {} ({line}): {error}", line_number + 1);
+                }
+            },
+            Err(_) => {
+                input_errors += 1;
+                eprintln!("invalid indicator on line {}: {line}", line_number + 1);
             }
-
-            let errors = input_errors + source_errors;
-            output
-                .print_batch(&BatchReport {
-                    results: results.clone(),
-                    summary: BatchSummary::from_results(&results, errors),
-                })
-                .map_err(|_| 3)?;
-
-            let max_severity = results
-                .iter()
-                .map(|result| result.risk.clone())
-                .filter_map(|risk| Severity::from_str(&risk).ok())
-                .max_by_key(|severity| severity.as_rank());
-
-            let exit_code = if let Some(risk) = max_severity {
-                if threshold_reached(&risk, fail_threshold) {
-                    1
-                } else {
-                    if source_errors > 0 {
-                        3
-                    } else {
-                        0
-                    }
-                }
-            } else {
-                if source_errors > 0 {
-                    3
-                } else if input_errors > 0 {
-                    2
-                } else {
-                    0
-                }
-            };
-            Ok(exit_code)
         }
     }
+
+    let errors = input_errors + source_errors;
+    output
+        .print_batch(&BatchReport {
+            results: results.clone(),
+            summary: BatchSummary::from_results(&results, errors),
+        })
+        .map_err(|_| 3)?;
+
+    let max_severity = results
+        .iter()
+        .map(|result| result.risk.clone())
+        .filter_map(|risk| Severity::from_str(&risk).ok())
+        .max_by_key(|severity| severity.as_rank());
+
+    let exit_code = if let Some(risk) = max_severity {
+        if threshold_reached(&risk, fail_threshold) {
+            1
+        } else if source_errors > 0 {
+            3
+        } else {
+            0
+        }
+    } else if source_errors > 0 {
+        3
+    } else if input_errors > 0 {
+        2
+    } else {
+        0
+    };
+    Ok(exit_code)
 }
 
 async fn lookup_indicator(

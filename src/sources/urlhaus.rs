@@ -52,7 +52,7 @@ fn findings_from_response(result: UrlhausResponse) -> Vec<SourceFinding> {
     };
 
     vec![SourceFinding {
-        source: "URLhaus".to_string(),
+        source: crate::sources::names::URLHAUS.to_string(),
         severity: Severity::High,
         summary,
         details: Some(serde_json::json!({

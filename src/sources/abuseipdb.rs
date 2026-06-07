@@ -85,7 +85,7 @@ fn findings_from_response(result: AbuseIpDbResponse) -> Vec<SourceFinding> {
     });
 
     vec![SourceFinding {
-        source: "AbuseIPDB".to_string(),
+        source: crate::sources::names::ABUSEIPDB.to_string(),
         severity,
         summary,
         details: Some(details),

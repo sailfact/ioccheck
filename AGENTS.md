@@ -574,15 +574,16 @@ shippable — pick items rather than treating this as one large change.
    `~/.cache/ioccheck/`. Wrap each source call (do not make source modules
    cache-aware). Never cache API keys. Add unit tests against a temp dir; no
    network. Update `README.md` and `CLAUDE.md` (drop "currently ignored").
-2. **Scoring-contract guard.** `scoring.rs` matches source names as string
-   literals, so a rename silently drops a source's score. Introduce shared
-   source-name constants referenced by both source modules and `scoring.rs`
-   (rename becomes a compile error) and add a test asserting each known source
-   string yields a non-zero score.
-3. **De-duplicate the single-lookup command arms.** `main.rs` repeats five
-   near-identical blocks. Map each `Command` variant to its parsed `Indicator`,
-   then run one shared `analyze_and_print` helper for the common
-   lookup → score → severity → print → threshold pipeline.
+2. **Scoring-contract guard.** *(Done.)* Source names live in the shared
+   `sources::names` module and are referenced by both the source modules and
+   `scoring.rs`, so a rename is a compile error rather than a silently dropped
+   score. The `every_known_source_scores_non_zero` test (driven by `names::ALL`)
+   asserts each known source string yields a non-zero score.
+3. **De-duplicate the single-lookup command arms.** *(Done.)* `main.rs::run`
+   parses each `Command` variant into an `Indicator`, then runs the shared
+   `analyze_and_print` helper for the common
+   lookup → score → severity → print → threshold pipeline; `File` mode routes to
+   `run_file`.
 
 ### Tier 2 — robustness & correctness
 

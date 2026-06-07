@@ -1,5 +1,6 @@
 use ioccheck::output::{Severity, SourceFinding};
 use ioccheck::scoring::{score_findings, severity_from_score};
+use ioccheck::sources::names;
 
 #[test]
 fn score_no_findings_is_zero() {
@@ -41,6 +42,27 @@ fn score_nvd_uses_severity_default() {
     }];
 
     assert_eq!(score_findings(&findings), 30);
+}
+
+/// Scoring-contract guard: every known source name must score non-zero, so a
+/// renamed source (whose findings would fall through to a default arm or be
+/// dropped) is caught here rather than silently contributing nothing. A
+/// `Medium` finding yields a positive score under every source's arm.
+#[test]
+fn every_known_source_scores_non_zero() {
+    for source in names::ALL {
+        let findings = vec![SourceFinding {
+            source: source.to_string(),
+            severity: Severity::Medium,
+            summary: format!("{source}: contract guard"),
+            details: None,
+        }];
+
+        assert!(
+            score_findings(&findings) > 0,
+            "source {source:?} scored zero — check its arm in scoring.rs"
+        );
+    }
 }
 
 #[test]

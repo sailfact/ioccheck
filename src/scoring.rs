@@ -1,22 +1,23 @@
 use crate::output::{Severity, SourceFinding};
+use crate::sources::names;
 
 pub fn score_findings(findings: &[SourceFinding]) -> u8 {
     let mut score = 0u8;
 
     for finding in findings {
         match finding.source.as_str() {
-            "CISA KEV" => score = score.saturating_add(40),
-            "URLhaus" => score = score.saturating_add(30),
-            "MalwareBazaar" => score = score.saturating_add(30),
-            "ThreatFox" => score = score.saturating_add(30),
-            "AbuseIPDB" => match finding.severity {
+            names::CISA_KEV => score = score.saturating_add(40),
+            names::URLHAUS => score = score.saturating_add(30),
+            names::MALWAREBAZAAR => score = score.saturating_add(30),
+            names::THREATFOX => score = score.saturating_add(30),
+            names::ABUSEIPDB => match finding.severity {
                 Severity::High => score = score.saturating_add(30),
                 Severity::Medium => score = score.saturating_add(15),
                 Severity::Low => score = score.saturating_add(5),
                 Severity::Info => {}
                 Severity::Critical => score = score.saturating_add(30),
             },
-            "AlienVault OTX" => match finding.severity {
+            names::OTX => match finding.severity {
                 Severity::Medium => score = score.saturating_add(15),
                 Severity::Low => score = score.saturating_add(5),
                 _ => {}

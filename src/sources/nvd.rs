@@ -135,7 +135,7 @@ fn findings_from_response(result: NvdResponse) -> Vec<SourceFinding> {
     };
 
     vec![SourceFinding {
-        source: "NVD".to_string(),
+        source: crate::sources::names::NVD.to_string(),
         severity,
         summary,
         details: Some(serde_json::json!({
