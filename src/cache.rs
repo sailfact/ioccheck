@@ -98,8 +98,14 @@ impl Cache {
 /// Run a source lookup, consulting the cache first when one is configured.
 ///
 /// On a fresh cache hit the closure is never invoked. On a miss the closure
-/// runs and its `Ok` result is written back; errors are propagated unchanged and
-/// never cached.
+/// runs and a *non-empty* `Ok` result is written back; errors are propagated
+/// unchanged and never cached.
+///
+/// Empty results are deliberately not cached. A key-gated source skipped for a
+/// missing key returns the same empty `Ok(vec![])` as a genuine no-hit, so
+/// caching it would let a first run without the key suppress real findings once
+/// the key is later configured (until the TTL expired). Not caching empties
+/// costs a re-query for clean indicators but avoids that stale-empty hazard.
 pub async fn cached_lookup<F, Fut>(
     cache: Option<&Cache>,
     source: &str,
@@ -119,7 +125,9 @@ where
     let findings = lookup().await?;
 
     if let Some(cache) = cache {
-        cache.put(source, indicator, &findings);
+        if !findings.is_empty() {
+            cache.put(source, indicator, &findings);
+        }
     }
     Ok(findings)
 }
@@ -234,6 +242,34 @@ mod tests {
         assert_eq!(first.len(), 1);
         assert_eq!(second.len(), 1);
         assert_eq!(calls.get(), 1, "source closure should run only once");
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn cached_lookup_does_not_cache_empty_results() {
+        let dir = std::env::temp_dir().join(format!("ioccheck-empty-{}", now_unix_secs()));
+        let cache = Cache::with_dir(dir.clone(), 3600);
+        let indicator = sample_indicator();
+
+        let calls = std::cell::Cell::new(0);
+        // Mimics a key-gated source skipped for a missing key: Ok but empty.
+        let skipped = || async {
+            calls.set(calls.get() + 1);
+            Ok(Vec::new())
+        };
+
+        cached_lookup(Some(&cache), "ThreatFox", &indicator, skipped)
+            .await
+            .expect("first lookup");
+        cached_lookup(Some(&cache), "ThreatFox", &indicator, skipped)
+            .await
+            .expect("second lookup");
+
+        // No entry was written, so the source is consulted again rather than a
+        // stale empty result suppressing a later (keyed) hit.
+        assert!(cache.get("ThreatFox", &indicator).is_none());
+        assert_eq!(calls.get(), 2);
 
         let _ = std::fs::remove_dir_all(dir);
     }

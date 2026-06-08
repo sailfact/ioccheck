@@ -126,7 +126,10 @@ treated as a miss.
 
 * Cache files live under `$XDG_CACHE_HOME/ioccheck` (or `~/.cache/ioccheck`),
   one JSON file per `(source, indicator)` pair.
-* Only successful lookups are cached; errors are never stored.
+* Only successful lookups with at least one finding are cached; errors and
+  empty results are never stored. (A key-gated source skipped for a missing key
+  returns an empty result, so caching empties could let a keyless first run
+  suppress real findings until the TTL expired.)
 * Caching is off unless `--cache` is passed, so default behavior is unchanged.
 * API keys are never part of a finding and are never written to the cache.
 * To clear the cache, delete the directory above.
