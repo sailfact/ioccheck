@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+@AGENTS.md
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 `ioccheck` is a Rust CLI that enriches indicators of compromise (IP, domain, URL, SHA256, CVE) using public threat-intelligence sources. `AGENTS.md` holds the full project charter (scope, security rules, conventions, MVP roadmap) — read it for intent; this file documents what is actually wired up today.
