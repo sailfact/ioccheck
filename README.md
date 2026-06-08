@@ -2,6 +2,18 @@
 
 `ioccheck` is a Rust-based command-line tool for enriching indicators of compromise with public threat intelligence.
 
+It supports five indicator types — IP, domain, URL, SHA256 hash, and CVE — querying public threat-intelligence feeds, combining the results into a single risk score, and printing either a human-readable report or stable JSON for automation.
+
+## Install
+
+```bash
+git clone https://github.com/sailfact/ioccheck.git
+cd ioccheck
+cargo build --release   # binary at target/release/ioccheck
+```
+
+Or run directly from source with `cargo run -- <args>` (examples below).
+
 ## Usage
 
 ```bash
@@ -45,9 +57,76 @@ NVD_API_KEY=
 * AbuseIPDB (IP lookup, requires `ABUSEIPDB_API_KEY`)
 * AlienVault OTX (all indicator types, requires `OTX_API_KEY`)
 
+## Scoring
+
+Each source that returns a hit contributes points to an additive score, which is
+capped at 100 and then bucketed into a risk level:
+
+| Source contribution                     | Points |
+| --------------------------------------- | ------ |
+| CISA KEV                                | +40    |
+| URLhaus                                 | +30    |
+| MalwareBazaar                           | +30    |
+| ThreatFox                               | +30    |
+| AbuseIPDB (high / medium / low)         | +30 / +15 / +5 |
+| AlienVault OTX (medium / low)           | +15 / +5 |
+| Other sources, e.g. NVD (by severity)   | critical +30 / high +20 / medium +10 / low +5 |
+
+| Score    | Risk     |
+| -------- | -------- |
+| 0–19     | low      |
+| 20–49    | medium   |
+| 50–79    | high     |
+| 80–100   | critical |
+
+Findings are advisory: a single feed hit is not proof of compromise. The report
+lists every contributing source so a score can be reviewed by hand.
+
+## JSON output
+
+With `--json`, a single-indicator lookup writes a stable object to stdout. All
+casing is lowercase (`risk`, `severity`, and `indicator_type`):
+
+```json
+{
+  "indicator": "185.220.101.42",
+  "indicator_type": "ip",
+  "risk": "high",
+  "score": 75,
+  "findings": [
+    {
+      "source": "AbuseIPDB",
+      "severity": "high",
+      "summary": "AbuseIPDB confidence 92% from 83 reports",
+      "details": null
+    }
+  ],
+  "summary": null
+}
+```
+
+Bulk `file` mode wraps the per-indicator results in `{ "results": [...], "summary": {...} }`,
+where `summary` carries the scanned/severity/error counts. When `--json` is set,
+only valid JSON goes to stdout; errors are written to stderr.
+
 ## Exit codes
 
 * `0` - completed successfully and no fail threshold matched
 * `1` - completed successfully but fail threshold matched
 * `2` - invalid input or configuration error
 * `3` - API/source failure
+
+## Limitations
+
+* Most sources are key-gated (AbuseIPDB, ThreatFox, OTX); without their API keys
+  those lookups are silently skipped, so IP and domain lookups may return no
+  findings out of the box. The two CVE sources (CISA KEV, NVD) work without a key.
+* Domain validation is regex-only and does not resolve DNS.
+* Threat-intelligence results are advisory, not authoritative.
+
+## Security notes
+
+* API keys are read only from the environment (or a local `.env`); never commit real keys.
+* `.env` should stay out of version control.
+* All source APIs are queried over HTTPS, and keys are never printed in output or errors.
+* `ioccheck` only reports — it never blocks indicators or executes any fetched content.
