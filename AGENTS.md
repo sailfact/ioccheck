@@ -567,13 +567,15 @@ shippable — pick items rather than treating this as one large change.
 
 ### Tier 1 — highest value, already-promised or low-risk
 
-1. **Caching layer (the one explicit v2 feature).** The `--cache` /
-   `--cache-ttl` flags already exist but are ignored. Implement a cache keyed by
-   `(source, indicator)` storing normalized `Vec<SourceFinding>` with a
-   timestamp, honoring the configured TTL. Use a simple local JSON cache under
-   `~/.cache/ioccheck/`. Wrap each source call (do not make source modules
-   cache-aware). Never cache API keys. Add unit tests against a temp dir; no
-   network. Update `README.md` and `CLAUDE.md` (drop "currently ignored").
+1. **Caching layer (the one explicit v2 feature).** *(Done.)* `--cache` /
+   `--cache-ttl` drive an on-disk cache keyed by `(source, indicator)` storing
+   normalized `Vec<SourceFinding>` with a timestamp, honoring the configured TTL
+   (inclusive boundary, so `--cache-ttl 0` disables reuse). Implemented as a
+   simple local JSON cache (`src/cache.rs`) under `$XDG_CACHE_HOME/ioccheck` (or
+   `~/.cache/ioccheck/`). `lookup_indicator` wraps each source call in
+   `cache::cached_lookup`, keeping source modules cache-unaware. Only successful
+   lookups are cached; API keys are never part of a finding. Unit-tested against
+   a temp dir with no network.
 2. **Scoring-contract guard.** *(Done.)* Source names live in the shared
    `sources::names` module and are referenced by both the source modules and
    `scoring.rs`, so a rename is a compile error rather than a silently dropped

@@ -41,7 +41,7 @@ Flow per indicator (`src/main.rs::run`): parse/validate → `lookup_indicator` (
 
 The MVP is complete. The prioritized backlog lives in `AGENTS.md` ("Post-MVP roadmap") — read it before starting new feature work. Highest-value next steps:
 
-- **Caching layer** — `--cache`/`--cache-ttl` are parsed but ignored; implement a `(source, indicator)` cache with TTL under `~/.cache/ioccheck/`, wrapping each source call (keep sources cache-unaware). Never cache API keys.
+- ~~**Caching layer**~~ — done: `--cache`/`--cache-ttl` now drive an on-disk `(source, indicator)` cache (`src/cache.rs`) under `$XDG_CACHE_HOME/ioccheck` (or `~/.cache/ioccheck/`). `lookup_indicator` wraps each source call in `cache::cached_lookup`, so sources stay cache-unaware; only successful lookups are cached (errors never are), and the TTL is inclusive so `--cache-ttl 0` disables reuse. Caching is off unless `--cache` is passed, and API keys are never part of a finding so nothing secret is cached.
 - ~~**Scoring-contract guard**~~ — done: source names live in `sources::names` and are referenced by both the source modules and `scoring.rs`; `every_known_source_scores_non_zero` guards the contract.
 - ~~**Refactor the repeated `main.rs` command arms**~~ — done: collapsed into the shared `analyze_and_print` helper (file mode in `run_file`).
 - **Per-source error isolation + concurrency** — stop letting one source's `Err` drop its siblings (see the aggregate-failure convention above); run a type's sources concurrently.

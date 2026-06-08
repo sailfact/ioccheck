@@ -3,13 +3,14 @@ use dotenvy::dotenv;
 use reqwest::Client;
 use std::time::Duration;
 
+use ioccheck::cache::{cached_lookup, Cache};
 use ioccheck::cli::{Cli, Command, FailThreshold};
 use ioccheck::indicator::{Indicator, IndicatorType};
 use ioccheck::output::{
     AnalysisResult, BatchReport, BatchSummary, OutputFormatter, Severity, SourceFinding,
 };
 use ioccheck::scoring::{score_findings, severity_from_score};
-use ioccheck::sources::{abuseipdb, cisa_kev, malwarebazaar, nvd, otx, threatfox, urlhaus};
+use ioccheck::sources::{abuseipdb, cisa_kev, malwarebazaar, names, nvd, otx, threatfox, urlhaus};
 
 #[tokio::main]
 async fn main() {
@@ -35,6 +36,13 @@ async fn main() {
 async fn run(cli: Cli, client: Client) -> Result<i32, i32> {
     let output = OutputFormatter::new(cli.no_color, cli.json);
     let fail_threshold = cli.fail_on.map(FailThreshold::into);
+    // The cache wraps each source call when `--cache` is set; sources stay
+    // cache-unaware. `None` means caching is disabled (the default).
+    let cache = if cli.cache {
+        Some(Cache::new(cli.cache_ttl))
+    } else {
+        None
+    };
 
     // Each single-indicator command differs only in how its argument is parsed;
     // everything after parsing is the shared `analyze_and_print` pipeline. File
@@ -45,10 +53,12 @@ async fn run(cli: Cli, client: Client) -> Result<i32, i32> {
         Command::Url { value } => Indicator::parse_url(&value).map_err(|_| 2)?,
         Command::Hash { value } => Indicator::parse_sha256(&value).map_err(|_| 2)?,
         Command::Cve { value } => Indicator::parse_cve(&value).map_err(|_| 2)?,
-        Command::File { path } => return run_file(&client, &output, fail_threshold, &path).await,
+        Command::File { path } => {
+            return run_file(&client, &output, fail_threshold, cache.as_ref(), &path).await
+        }
     };
 
-    analyze_and_print(&client, &output, fail_threshold, &indicator).await
+    analyze_and_print(&client, &output, fail_threshold, cache.as_ref(), &indicator).await
 }
 
 /// Shared single-indicator pipeline: lookup → score → severity → print →
@@ -57,9 +67,12 @@ async fn analyze_and_print(
     client: &Client,
     output: &OutputFormatter,
     fail_threshold: Option<Severity>,
+    cache: Option<&Cache>,
     indicator: &Indicator,
 ) -> Result<i32, i32> {
-    let findings = lookup_indicator(client, indicator).await.map_err(|_| 3)?;
+    let findings = lookup_indicator(client, cache, indicator)
+        .await
+        .map_err(|_| 3)?;
     let score = score_findings(&findings);
     let risk = severity_from_score(score);
     let analysis = AnalysisResult::new(indicator, risk.clone(), score, findings);
@@ -77,6 +90,7 @@ async fn run_file(
     client: &Client,
     output: &OutputFormatter,
     fail_threshold: Option<Severity>,
+    cache: Option<&Cache>,
     path: &std::path::Path,
 ) -> Result<i32, i32> {
     let text = std::fs::read_to_string(path).map_err(|_| 2)?;
@@ -91,7 +105,7 @@ async fn run_file(
         }
 
         match Indicator::from_guess(line) {
-            Ok(indicator) => match lookup_indicator(client, &indicator).await {
+            Ok(indicator) => match lookup_indicator(client, cache, &indicator).await {
                 Ok(findings) => {
                     let score = score_findings(&findings);
                     let risk = severity_from_score(score);
@@ -143,39 +157,103 @@ async fn run_file(
 
 async fn lookup_indicator(
     client: &Client,
+    cache: Option<&Cache>,
     indicator: &Indicator,
 ) -> anyhow::Result<Vec<SourceFinding>> {
+    // Each source call is wrapped in `cached_lookup` so a fresh `(source,
+    // indicator)` cache entry short-circuits the network call. Sources stay
+    // cache-unaware; the source-name constant doubles as the cache key.
     match indicator.kind {
         IndicatorType::Ip => {
             let mut findings = Vec::new();
-            findings.extend(threatfox::lookup(client, indicator).await?);
-            findings.extend(abuseipdb::lookup(client, indicator).await?);
-            findings.extend(otx::lookup(client, indicator).await?);
+            findings.extend(
+                cached_lookup(cache, names::THREATFOX, indicator, || {
+                    threatfox::lookup(client, indicator)
+                })
+                .await?,
+            );
+            findings.extend(
+                cached_lookup(cache, names::ABUSEIPDB, indicator, || {
+                    abuseipdb::lookup(client, indicator)
+                })
+                .await?,
+            );
+            findings.extend(
+                cached_lookup(cache, names::OTX, indicator, || {
+                    otx::lookup(client, indicator)
+                })
+                .await?,
+            );
             Ok(findings)
         }
         IndicatorType::Domain => {
             let mut findings = Vec::new();
-            findings.extend(threatfox::lookup(client, indicator).await?);
-            findings.extend(otx::lookup(client, indicator).await?);
+            findings.extend(
+                cached_lookup(cache, names::THREATFOX, indicator, || {
+                    threatfox::lookup(client, indicator)
+                })
+                .await?,
+            );
+            findings.extend(
+                cached_lookup(cache, names::OTX, indicator, || {
+                    otx::lookup(client, indicator)
+                })
+                .await?,
+            );
             Ok(findings)
         }
         IndicatorType::Url => {
             let mut findings = Vec::new();
-            findings.extend(urlhaus::lookup(client, indicator).await?);
-            findings.extend(otx::lookup(client, indicator).await?);
+            findings.extend(
+                cached_lookup(cache, names::URLHAUS, indicator, || {
+                    urlhaus::lookup(client, indicator)
+                })
+                .await?,
+            );
+            findings.extend(
+                cached_lookup(cache, names::OTX, indicator, || {
+                    otx::lookup(client, indicator)
+                })
+                .await?,
+            );
             Ok(findings)
         }
         IndicatorType::Sha256 => {
             let mut findings = Vec::new();
-            findings.extend(malwarebazaar::lookup(client, indicator).await?);
-            findings.extend(otx::lookup(client, indicator).await?);
+            findings.extend(
+                cached_lookup(cache, names::MALWAREBAZAAR, indicator, || {
+                    malwarebazaar::lookup(client, indicator)
+                })
+                .await?,
+            );
+            findings.extend(
+                cached_lookup(cache, names::OTX, indicator, || {
+                    otx::lookup(client, indicator)
+                })
+                .await?,
+            );
             Ok(findings)
         }
         IndicatorType::Cve => {
             let mut findings = Vec::new();
-            findings.extend(cisa_kev::lookup(client, indicator).await?);
-            findings.extend(nvd::lookup(client, indicator).await?);
-            findings.extend(otx::lookup(client, indicator).await?);
+            findings.extend(
+                cached_lookup(cache, names::CISA_KEV, indicator, || {
+                    cisa_kev::lookup(client, indicator)
+                })
+                .await?,
+            );
+            findings.extend(
+                cached_lookup(cache, names::NVD, indicator, || {
+                    nvd::lookup(client, indicator)
+                })
+                .await?,
+            );
+            findings.extend(
+                cached_lookup(cache, names::OTX, indicator, || {
+                    otx::lookup(client, indicator)
+                })
+                .await?,
+            );
             Ok(findings)
         }
         _ => Ok(Vec::new()),

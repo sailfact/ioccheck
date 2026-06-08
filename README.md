@@ -32,8 +32,8 @@ cargo run -- file indicators.txt --fail-on high
 * `--json` - output machine-readable JSON
 * `--no-color` - disable colored output
 * `--timeout <seconds>` - request timeout for API lookups
-* `--cache` - reserved for v2; currently ignored
-* `--cache-ttl <seconds>` - reserved for v2; currently ignored
+* `--cache` - cache normalized source findings on disk and reuse fresh entries (off by default)
+* `--cache-ttl <seconds>` - max age for a cached entry to be reused, default `3600` (requires `--cache`)
 * `--fail-on <low|medium|high|critical>` - return exit code `1` when the highest finding meets or exceeds this threshold
 
 ## Environment
@@ -115,6 +115,21 @@ only valid JSON goes to stdout; errors are written to stderr.
 * `1` - completed successfully but fail threshold matched
 * `2` - invalid input or configuration error
 * `3` - API/source failure
+
+## Caching
+
+`--cache` enables an on-disk cache of normalized source findings, keyed by
+`(source, indicator)`. On a lookup, each source is consulted from the cache
+first; a fresh entry skips the network call, and a miss queries the source and
+stores its result. Entries older than `--cache-ttl` seconds (default `3600`) are
+treated as a miss.
+
+* Cache files live under `$XDG_CACHE_HOME/ioccheck` (or `~/.cache/ioccheck`),
+  one JSON file per `(source, indicator)` pair.
+* Only successful lookups are cached; errors are never stored.
+* Caching is off unless `--cache` is passed, so default behavior is unchanged.
+* API keys are never part of a finding and are never written to the cache.
+* To clear the cache, delete the directory above.
 
 ## Limitations
 
