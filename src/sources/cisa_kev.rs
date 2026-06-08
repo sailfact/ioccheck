@@ -55,7 +55,7 @@ fn findings_from_feed(indicator: &Indicator, feed: CisaFeed) -> Vec<SourceFindin
         let summary = format!("Listed in CISA KEV feed: {} {}", vendor_project, product);
 
         vec![SourceFinding {
-            source: "CISA KEV".to_string(),
+            source: crate::sources::names::CISA_KEV.to_string(),
             severity: Severity::High,
             summary,
             details: Some(serde_json::json!({

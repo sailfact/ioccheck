@@ -124,7 +124,7 @@ fn findings_from_response(result: OtxResponse) -> Vec<SourceFinding> {
     };
 
     vec![SourceFinding {
-        source: "AlienVault OTX".to_string(),
+        source: crate::sources::names::OTX.to_string(),
         severity,
         summary,
         details: Some(serde_json::json!({

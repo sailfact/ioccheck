@@ -94,7 +94,7 @@ fn findings_from_response(result: ThreatFoxResponse) -> Vec<SourceFinding> {
             );
 
             SourceFinding {
-                source: "ThreatFox".to_string(),
+                source: crate::sources::names::THREATFOX.to_string(),
                 severity,
                 summary,
                 details: Some(serde_json::json!({
