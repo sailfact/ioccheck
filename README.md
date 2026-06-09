@@ -114,7 +114,17 @@ only valid JSON goes to stdout; errors are written to stderr.
 * `0` - completed successfully and no fail threshold matched
 * `1` - completed successfully but fail threshold matched
 * `2` - invalid input or configuration error
-* `3` - API/source failure
+* `3` - API/source failure. Single-indicator lookups return this only when
+  every attempted source for that indicator fails; partial source failures are
+  warned on stderr and successful sibling findings are still reported.
+
+## Source query behavior
+
+For each indicator, applicable sources are queried concurrently to keep lookups
+responsive. Source failures are isolated: if one source fails but another source
+for the same indicator succeeds, `ioccheck` keeps the successful findings and
+writes a warning to stderr. A lookup is treated as an API/source failure only
+when every attempted source for that indicator fails.
 
 ## Caching
 

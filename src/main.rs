@@ -163,101 +163,120 @@ async fn lookup_indicator(
     // Each source call is wrapped in `cached_lookup` so a fresh `(source,
     // indicator)` cache entry short-circuits the network call. Sources stay
     // cache-unaware; the source-name constant doubles as the cache key.
+    //
+    // Sources for a given indicator type are queried concurrently. Their errors
+    // are isolated: successful source findings are kept, failed source names are
+    // warned on stderr, and the lookup fails only when every source attempted
+    // for that indicator type failed.
     match indicator.kind {
         IndicatorType::Ip => {
-            let mut findings = Vec::new();
-            findings.extend(
+            let (threatfox_result, abuseipdb_result, otx_result) = tokio::join!(
                 cached_lookup(cache, names::THREATFOX, indicator, || {
                     threatfox::lookup(client, indicator)
-                })
-                .await?,
-            );
-            findings.extend(
+                }),
                 cached_lookup(cache, names::ABUSEIPDB, indicator, || {
                     abuseipdb::lookup(client, indicator)
-                })
-                .await?,
-            );
-            findings.extend(
+                }),
                 cached_lookup(cache, names::OTX, indicator, || {
                     otx::lookup(client, indicator)
                 })
-                .await?,
             );
-            Ok(findings)
+            collect_source_findings(vec![
+                (names::THREATFOX, threatfox_result),
+                (names::ABUSEIPDB, abuseipdb_result),
+                (names::OTX, otx_result),
+            ])
         }
         IndicatorType::Domain => {
-            let mut findings = Vec::new();
-            findings.extend(
+            let (threatfox_result, otx_result) = tokio::join!(
                 cached_lookup(cache, names::THREATFOX, indicator, || {
                     threatfox::lookup(client, indicator)
-                })
-                .await?,
-            );
-            findings.extend(
+                }),
                 cached_lookup(cache, names::OTX, indicator, || {
                     otx::lookup(client, indicator)
                 })
-                .await?,
             );
-            Ok(findings)
+            collect_source_findings(vec![
+                (names::THREATFOX, threatfox_result),
+                (names::OTX, otx_result),
+            ])
         }
         IndicatorType::Url => {
-            let mut findings = Vec::new();
-            findings.extend(
+            let (urlhaus_result, otx_result) = tokio::join!(
                 cached_lookup(cache, names::URLHAUS, indicator, || {
                     urlhaus::lookup(client, indicator)
-                })
-                .await?,
-            );
-            findings.extend(
+                }),
                 cached_lookup(cache, names::OTX, indicator, || {
                     otx::lookup(client, indicator)
                 })
-                .await?,
             );
-            Ok(findings)
+            collect_source_findings(vec![
+                (names::URLHAUS, urlhaus_result),
+                (names::OTX, otx_result),
+            ])
         }
         IndicatorType::Sha256 => {
-            let mut findings = Vec::new();
-            findings.extend(
+            let (malwarebazaar_result, otx_result) = tokio::join!(
                 cached_lookup(cache, names::MALWAREBAZAAR, indicator, || {
                     malwarebazaar::lookup(client, indicator)
-                })
-                .await?,
-            );
-            findings.extend(
+                }),
                 cached_lookup(cache, names::OTX, indicator, || {
                     otx::lookup(client, indicator)
                 })
-                .await?,
             );
-            Ok(findings)
+            collect_source_findings(vec![
+                (names::MALWAREBAZAAR, malwarebazaar_result),
+                (names::OTX, otx_result),
+            ])
         }
         IndicatorType::Cve => {
-            let mut findings = Vec::new();
-            findings.extend(
+            let (cisa_kev_result, nvd_result, otx_result) = tokio::join!(
                 cached_lookup(cache, names::CISA_KEV, indicator, || {
                     cisa_kev::lookup(client, indicator)
-                })
-                .await?,
-            );
-            findings.extend(
+                }),
                 cached_lookup(cache, names::NVD, indicator, || {
                     nvd::lookup(client, indicator)
-                })
-                .await?,
-            );
-            findings.extend(
+                }),
                 cached_lookup(cache, names::OTX, indicator, || {
                     otx::lookup(client, indicator)
                 })
-                .await?,
             );
-            Ok(findings)
+            collect_source_findings(vec![
+                (names::CISA_KEV, cisa_kev_result),
+                (names::NVD, nvd_result),
+                (names::OTX, otx_result),
+            ])
         }
         _ => Ok(Vec::new()),
     }
+}
+
+fn collect_source_findings(
+    results: Vec<(&'static str, anyhow::Result<Vec<SourceFinding>>)>,
+) -> anyhow::Result<Vec<SourceFinding>> {
+    let mut findings = Vec::new();
+    let mut successful_sources = 0;
+    let mut errors = Vec::new();
+
+    for (source, result) in results {
+        match result {
+            Ok(mut source_findings) => {
+                successful_sources += 1;
+                findings.append(&mut source_findings);
+            }
+            Err(error) => errors.push(format!("{source}: {error:#}")),
+        }
+    }
+
+    if successful_sources == 0 && !errors.is_empty() {
+        anyhow::bail!("all sources failed: {}", errors.join("; "));
+    }
+
+    for error in errors {
+        eprintln!("warning: source lookup failed: {error}");
+    }
+
+    Ok(findings)
 }
 
 fn threshold_reached(risk: &Severity, threshold: Option<Severity>) -> bool {
@@ -282,5 +301,45 @@ impl FromStrSeverity for Severity {
             "critical" => Ok(Severity::Critical),
             _ => Err(()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn finding(source: &str) -> SourceFinding {
+        SourceFinding {
+            source: source.to_string(),
+            severity: Severity::High,
+            summary: "test finding".to_string(),
+            details: None,
+        }
+    }
+
+    #[test]
+    fn collect_source_findings_keeps_successes_when_a_sibling_fails() {
+        let findings = collect_source_findings(vec![
+            (names::URLHAUS, Ok(vec![finding(names::URLHAUS)])),
+            (names::OTX, Err(anyhow::anyhow!("temporary failure"))),
+        ])
+        .expect("one successful source should keep the lookup successful");
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].source, names::URLHAUS);
+    }
+
+    #[test]
+    fn collect_source_findings_fails_when_every_source_fails() {
+        let error = collect_source_findings(vec![
+            (names::URLHAUS, Err(anyhow::anyhow!("urlhaus failed"))),
+            (names::OTX, Err(anyhow::anyhow!("otx failed"))),
+        ])
+        .expect_err("all failed sources should fail the lookup");
+
+        let message = error.to_string();
+        assert!(message.contains("all sources failed"));
+        assert!(message.contains(names::URLHAUS));
+        assert!(message.contains(names::OTX));
     }
 }
