@@ -14,6 +14,21 @@ pub enum IndicatorType {
     Unknown,
 }
 
+impl IndicatorType {
+    /// Stable lowercase tag for this type. Used both for the lowercase
+    /// `indicator_type` JSON field and as part of cache keys.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            IndicatorType::Ip => "ip",
+            IndicatorType::Domain => "domain",
+            IndicatorType::Url => "url",
+            IndicatorType::Sha256 => "sha256",
+            IndicatorType::Cve => "cve",
+            IndicatorType::Unknown => "unknown",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Indicator {
     pub value: String,

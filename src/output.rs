@@ -1,9 +1,9 @@
 use colored::Colorize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::Error;
 
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
     Info,
@@ -35,7 +35,7 @@ impl Severity {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SourceFinding {
     pub source: String,
     pub severity: Severity,
@@ -68,15 +68,7 @@ impl AnalysisResult {
 
         Self {
             indicator: indicator.value.clone(),
-            indicator_type: match indicator.kind {
-                crate::indicator::IndicatorType::Ip => "ip",
-                crate::indicator::IndicatorType::Domain => "domain",
-                crate::indicator::IndicatorType::Url => "url",
-                crate::indicator::IndicatorType::Sha256 => "sha256",
-                crate::indicator::IndicatorType::Cve => "cve",
-                crate::indicator::IndicatorType::Unknown => "unknown",
-            }
-            .to_string(),
+            indicator_type: indicator.kind.as_str().to_string(),
             risk: risk.as_str().to_string(),
             score,
             findings,

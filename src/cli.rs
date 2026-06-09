@@ -16,13 +16,16 @@ pub struct Cli {
     #[arg(long, default_value_t = 15)]
     pub timeout: u64,
 
-    #[arg(long, help = "Reserved for v2; currently ignored")]
+    #[arg(
+        long,
+        help = "Cache normalized source findings under ~/.cache/ioccheck and reuse fresh entries"
+    )]
     pub cache: bool,
 
     #[arg(
         long,
         default_value_t = 3600,
-        help = "Reserved for v2; currently ignored"
+        help = "Max age in seconds for a cached entry to be reused (requires --cache)"
     )]
     pub cache_ttl: u64,
 
