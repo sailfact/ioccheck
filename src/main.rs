@@ -1,6 +1,8 @@
 use clap::Parser;
 use dotenvy::dotenv;
 use reqwest::Client;
+use std::env;
+use std::io::{self, Write};
 use std::time::Duration;
 
 use ioccheck::cache::{cached_lookup, Cache};
@@ -70,9 +72,13 @@ async fn analyze_and_print(
     cache: Option<&Cache>,
     indicator: &Indicator,
 ) -> Result<i32, i32> {
-    let findings = lookup_indicator(client, cache, indicator)
-        .await
-        .map_err(|_| 3)?;
+    let findings = match lookup_indicator(client, cache, indicator).await {
+        Ok(findings) => findings,
+        Err(error) => {
+            eprintln!("source lookup failed: {error:#}");
+            return Err(3);
+        }
+    };
     let score = score_findings(&findings);
     let risk = severity_from_score(score);
     let analysis = AnalysisResult::new(indicator, risk.clone(), score, findings);
@@ -171,13 +177,21 @@ async fn lookup_indicator(
     match indicator.kind {
         IndicatorType::Ip => {
             let (threatfox_result, abuseipdb_result, otx_result) = tokio::join!(
-                cached_lookup(cache, names::THREATFOX, indicator, || {
-                    threatfox::lookup(client, indicator)
-                }),
-                cached_lookup(cache, names::ABUSEIPDB, indicator, || {
-                    abuseipdb::lookup(client, indicator)
-                }),
-                cached_lookup(cache, names::OTX, indicator, || {
+                optional_lookup(
+                    cache,
+                    "THREATFOX_API_KEY",
+                    names::THREATFOX,
+                    indicator,
+                    || { threatfox::lookup(client, indicator) }
+                ),
+                optional_lookup(
+                    cache,
+                    "ABUSEIPDB_API_KEY",
+                    names::ABUSEIPDB,
+                    indicator,
+                    || { abuseipdb::lookup(client, indicator) }
+                ),
+                optional_lookup(cache, "OTX_API_KEY", names::OTX, indicator, || {
                     otx::lookup(client, indicator)
                 })
             );
@@ -189,10 +203,14 @@ async fn lookup_indicator(
         }
         IndicatorType::Domain => {
             let (threatfox_result, otx_result) = tokio::join!(
-                cached_lookup(cache, names::THREATFOX, indicator, || {
-                    threatfox::lookup(client, indicator)
-                }),
-                cached_lookup(cache, names::OTX, indicator, || {
+                optional_lookup(
+                    cache,
+                    "THREATFOX_API_KEY",
+                    names::THREATFOX,
+                    indicator,
+                    || { threatfox::lookup(client, indicator) }
+                ),
+                optional_lookup(cache, "OTX_API_KEY", names::OTX, indicator, || {
                     otx::lookup(client, indicator)
                 })
             );
@@ -203,10 +221,10 @@ async fn lookup_indicator(
         }
         IndicatorType::Url => {
             let (urlhaus_result, otx_result) = tokio::join!(
-                cached_lookup(cache, names::URLHAUS, indicator, || {
+                required_lookup(cache, names::URLHAUS, indicator, || {
                     urlhaus::lookup(client, indicator)
                 }),
-                cached_lookup(cache, names::OTX, indicator, || {
+                optional_lookup(cache, "OTX_API_KEY", names::OTX, indicator, || {
                     otx::lookup(client, indicator)
                 })
             );
@@ -217,10 +235,10 @@ async fn lookup_indicator(
         }
         IndicatorType::Sha256 => {
             let (malwarebazaar_result, otx_result) = tokio::join!(
-                cached_lookup(cache, names::MALWAREBAZAAR, indicator, || {
+                required_lookup(cache, names::MALWAREBAZAAR, indicator, || {
                     malwarebazaar::lookup(client, indicator)
                 }),
-                cached_lookup(cache, names::OTX, indicator, || {
+                optional_lookup(cache, "OTX_API_KEY", names::OTX, indicator, || {
                     otx::lookup(client, indicator)
                 })
             );
@@ -231,13 +249,13 @@ async fn lookup_indicator(
         }
         IndicatorType::Cve => {
             let (cisa_kev_result, nvd_result, otx_result) = tokio::join!(
-                cached_lookup(cache, names::CISA_KEV, indicator, || {
+                required_lookup(cache, names::CISA_KEV, indicator, || {
                     cisa_kev::lookup(client, indicator)
                 }),
-                cached_lookup(cache, names::NVD, indicator, || {
+                required_lookup(cache, names::NVD, indicator, || {
                     nvd::lookup(client, indicator)
                 }),
-                cached_lookup(cache, names::OTX, indicator, || {
+                optional_lookup(cache, "OTX_API_KEY", names::OTX, indicator, || {
                     otx::lookup(client, indicator)
                 })
             );
@@ -251,29 +269,89 @@ async fn lookup_indicator(
     }
 }
 
+enum SourceLookupOutcome {
+    Attempted(anyhow::Result<Vec<SourceFinding>>),
+    Skipped,
+}
+
+async fn required_lookup<F, Fut>(
+    cache: Option<&Cache>,
+    source: &str,
+    indicator: &Indicator,
+    lookup: F,
+) -> SourceLookupOutcome
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<Vec<SourceFinding>>>,
+{
+    SourceLookupOutcome::Attempted(cached_lookup(cache, source, indicator, lookup).await)
+}
+
+async fn optional_lookup<F, Fut>(
+    cache: Option<&Cache>,
+    env_var: &str,
+    source: &str,
+    indicator: &Indicator,
+    lookup: F,
+) -> SourceLookupOutcome
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<Vec<SourceFinding>>>,
+{
+    if !env_key_is_configured(env_var) {
+        return SourceLookupOutcome::Skipped;
+    }
+
+    required_lookup(cache, source, indicator, lookup).await
+}
+
+fn env_key_is_configured(name: &str) -> bool {
+    env::var(name)
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+}
+
 fn collect_source_findings(
-    results: Vec<(&'static str, anyhow::Result<Vec<SourceFinding>>)>,
+    results: Vec<(&'static str, SourceLookupOutcome)>,
+) -> anyhow::Result<Vec<SourceFinding>> {
+    let mut stderr = io::stderr().lock();
+    collect_source_findings_with_warning_writer(results, &mut stderr)
+}
+
+fn collect_source_findings_with_warning_writer<W: Write>(
+    results: Vec<(&'static str, SourceLookupOutcome)>,
+    warning_writer: &mut W,
 ) -> anyhow::Result<Vec<SourceFinding>> {
     let mut findings = Vec::new();
+    let mut attempted_sources = 0;
     let mut successful_sources = 0;
     let mut errors = Vec::new();
 
     for (source, result) in results {
         match result {
-            Ok(mut source_findings) => {
+            SourceLookupOutcome::Attempted(Ok(mut source_findings)) => {
+                attempted_sources += 1;
                 successful_sources += 1;
                 findings.append(&mut source_findings);
             }
-            Err(error) => errors.push(format!("{source}: {error:#}")),
+            SourceLookupOutcome::Attempted(Err(error)) => {
+                attempted_sources += 1;
+                errors.push(format!("{source}: {error:#}"));
+            }
+            SourceLookupOutcome::Skipped => {}
         }
     }
 
-    if successful_sources == 0 && !errors.is_empty() {
-        anyhow::bail!("all sources failed: {}", errors.join("; "));
+    if attempted_sources == 0 {
+        return Ok(findings);
+    }
+
+    if successful_sources == 0 {
+        anyhow::bail!("all attempted sources failed: {}", errors.join("; "));
     }
 
     for error in errors {
-        eprintln!("warning: source lookup failed: {error}");
+        let _ = writeln!(warning_writer, "warning: source lookup failed: {error}");
     }
 
     Ok(findings)
@@ -319,27 +397,118 @@ mod tests {
 
     #[test]
     fn collect_source_findings_keeps_successes_when_a_sibling_fails() {
-        let findings = collect_source_findings(vec![
-            (names::URLHAUS, Ok(vec![finding(names::URLHAUS)])),
-            (names::OTX, Err(anyhow::anyhow!("temporary failure"))),
-        ])
+        let mut warnings = Vec::new();
+        let findings = collect_source_findings_with_warning_writer(
+            vec![
+                (
+                    names::URLHAUS,
+                    SourceLookupOutcome::Attempted(Ok(vec![finding(names::URLHAUS)])),
+                ),
+                (
+                    names::OTX,
+                    SourceLookupOutcome::Attempted(Err(anyhow::anyhow!("temporary failure"))),
+                ),
+            ],
+            &mut warnings,
+        )
         .expect("one successful source should keep the lookup successful");
 
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].source, names::URLHAUS);
+
+        let warnings = String::from_utf8(warnings).expect("warnings should be valid utf-8");
+        assert!(warnings.contains("warning: source lookup failed"));
+        assert!(warnings.contains(names::OTX));
+        assert!(warnings.contains("temporary failure"));
+        assert!(!warnings.contains(names::URLHAUS));
     }
 
     #[test]
     fn collect_source_findings_fails_when_every_source_fails() {
-        let error = collect_source_findings(vec![
-            (names::URLHAUS, Err(anyhow::anyhow!("urlhaus failed"))),
-            (names::OTX, Err(anyhow::anyhow!("otx failed"))),
-        ])
+        let mut warnings = Vec::new();
+        let error = collect_source_findings_with_warning_writer(
+            vec![
+                (
+                    names::URLHAUS,
+                    SourceLookupOutcome::Attempted(Err(anyhow::anyhow!("urlhaus failed"))),
+                ),
+                (
+                    names::OTX,
+                    SourceLookupOutcome::Attempted(Err(anyhow::anyhow!("otx failed"))),
+                ),
+            ],
+            &mut warnings,
+        )
         .expect_err("all failed sources should fail the lookup");
 
         let message = error.to_string();
-        assert!(message.contains("all sources failed"));
+        assert!(message.contains("all attempted sources failed"));
         assert!(message.contains(names::URLHAUS));
         assert!(message.contains(names::OTX));
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn collect_source_findings_ignores_skipped_sources_when_attempts_fail() {
+        let mut warnings = Vec::new();
+        let error = collect_source_findings_with_warning_writer(
+            vec![
+                (
+                    names::URLHAUS,
+                    SourceLookupOutcome::Attempted(Err(anyhow::anyhow!("urlhaus failed"))),
+                ),
+                (names::OTX, SourceLookupOutcome::Skipped),
+            ],
+            &mut warnings,
+        )
+        .expect_err("skipped sources should not mask attempted source failures");
+
+        let message = error.to_string();
+        assert!(message.contains("all attempted sources failed"));
+        assert!(message.contains(names::URLHAUS));
+        assert!(!message.contains(names::OTX));
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn collect_source_findings_all_skipped_is_empty_success() {
+        let mut warnings = Vec::new();
+        let findings = collect_source_findings_with_warning_writer(
+            vec![
+                (names::THREATFOX, SourceLookupOutcome::Skipped),
+                (names::ABUSEIPDB, SourceLookupOutcome::Skipped),
+                (names::OTX, SourceLookupOutcome::Skipped),
+            ],
+            &mut warnings,
+        )
+        .expect("no configured optional sources should be a clean no-findings result");
+
+        assert!(findings.is_empty());
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn collect_source_findings_treats_empty_success_as_success() {
+        let mut warnings = Vec::new();
+        let findings = collect_source_findings_with_warning_writer(
+            vec![
+                (
+                    names::URLHAUS,
+                    SourceLookupOutcome::Attempted(Ok(Vec::new())),
+                ),
+                (
+                    names::OTX,
+                    SourceLookupOutcome::Attempted(Err(anyhow::anyhow!("otx failed"))),
+                ),
+            ],
+            &mut warnings,
+        )
+        .expect("a source that successfully returns no findings still isolated sibling failure");
+
+        assert!(findings.is_empty());
+
+        let warnings = String::from_utf8(warnings).expect("warnings should be valid utf-8");
+        assert!(warnings.contains(names::OTX));
+        assert!(warnings.contains("otx failed"));
     }
 }
